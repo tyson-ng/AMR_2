@@ -20,4 +20,12 @@ const float TICKS_PER_REVOLUTION = 1400.0;
 #define LIDAR_RX 16   // Nối vào TX của Lidar
 #define LIDAR_TX 12   // Nối vào RX của Lidar
 #define LIDAR_EN 13   // Chân Enable (nếu có)
-#define LIDAR_PWM 17  // Chân điều khiển tốc độ quay (nếu có)
+#define LIDAR_PWM 17  // Chân điều khiển tốc độ quay 
+
+// --- CHÂN CẮM ĐỘNG CƠ ---
+#define MOTOR_PWMA 32
+#define MOTOR_AIN2 33
+#define MOTOR_AIN1 25
+#define MOTOR_BIN1 26
+#define MOTOR_BIN2 27
+#define MOTOR_PWMB 14

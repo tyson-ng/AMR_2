@@ -17,9 +17,14 @@ public:
         return bt.available() > 0;
     }
 
-    // Đọc 1 ký tự lệnh
+    // Đọc 1 ký tự lệnh (Dùng cho lệnh 1, 2, 3)
     char readCommand() {
         return bt.read();
+    }
+
+    // --- HÀM MỚI THÊM: Đọc cả một chuỗi lệnh dài (Dùng cho P150, V0.15, STOP) ---
+    String readStringUntil(char terminator) {
+        return bt.readStringUntil(terminator);
     }
 
     // Các hàm gửi dữ liệu (Dùng template để tự động nhận dạng kiểu số/chữ)
@@ -36,6 +41,11 @@ public:
     template <typename T>
     void println(T msg) {
         bt.println(msg);
+    }
+
+    template <typename T>
+    void println(T msg, int format) {
+        bt.println(msg, format);
     }
 
     void println() {
