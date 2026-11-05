@@ -30,9 +30,9 @@ public:
         stop(); 
     }
 
-    // Điều khiển bánh trái (GIỮ NGUYÊN)
+    // Điều khiển bánh trái 
     void setLeftMotor(int speed) {
-        if (speed > 0) { // Lệnh Tiến -> Đảo HIGH/LOW để ép động cơ quay tới
+        if (speed > 0) { // Lệnh Tiến 
             digitalWrite(MOTOR_AIN1, LOW);
             digitalWrite(MOTOR_AIN2, HIGH);
         } else if (speed < 0) { // Lệnh Lùi
@@ -50,12 +50,12 @@ public:
         #endif
     }
 
-    // Điều khiển bánh phải (ĐÃ ĐẢO CHIỀU LOGIC)
+    // Điều khiển bánh phải 
     void setRightMotor(int speed) {
-        if (speed > 0) { // Lệnh Tiến -> Ép động cơ phải quay ngược lại để xe đi thẳng
+        if (speed > 0) { // Lệnh Tiến 
             digitalWrite(MOTOR_BIN1, LOW);
             digitalWrite(MOTOR_BIN2, HIGH);
-        } else if (speed < 0) { // Lệnh Lùi -> Ép quay chiều kia
+        } else if (speed < 0) { // Lệnh Lùi 
             digitalWrite(MOTOR_BIN1, HIGH);
             digitalWrite(MOTOR_BIN2, LOW);
         } else { // Dừng

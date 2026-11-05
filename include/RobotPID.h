@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <math.h>
 
 // ==========================================================
 // 1. PID VÒNG TRONG (INNER LOOP - ĐIỀU KHIỂN VẬN TỐC BÁNH XE)
@@ -14,17 +15,23 @@ public:
     RobotPID(float p, float i, float d, float min_val, float max_val) {
         kp = p; ki = i; kd = d;
         output_min = min_val; output_max = max_val;
-        integral = 0.0; last_error = 0.0;
+        integral = 0.0f; last_error = 0.0f;
     }
 
     float compute(float setpoint, float measured_value, float dt) {
-        if (dt <= 0.0) return 0.0;
+        if (dt <= 0.0f) return 0.0f;
+
+        // Xóa tích phân khi yêu cầu dừng hẳn và bánh đã dừng để tránh rè động cơ
+        if (fabsf(setpoint) < 0.001f && fabsf(measured_value) < 0.005f) {
+            integral = 0.0f;
+            last_error = 0.0f;
+            return 0.0f;
+        }
 
         float error = setpoint - measured_value;
         integral += error * dt;
         
-        // Anti-windup
-        if (ki != 0) {
+        if (ki != 0.0f) {
             float max_integral = output_max / ki;
             float min_integral = output_min / ki;
             if (integral > max_integral) integral = max_integral;
@@ -41,7 +48,8 @@ public:
         return output;
     }
     
-    void reset() { integral = 0.0; last_error = 0.0; }
+    void setTunings(float p, float i, float d) { kp = p; ki = i; kd = d; }
+    void reset() { integral = 0.0f; last_error = 0.0f; }
 };
 
 // ==========================================================
@@ -57,32 +65,35 @@ public:
     HeadingPID(float p, float i, float d, float max_v) {
         kp = p; ki = i; kd = d;
         max_delta_v = max_v;
-        integral = 0.0;
+        integral = 0.0f;
+    }
+
+    // Chuẩn hóa mọi góc bất kỳ về đoạn [-180, 180]
+    static float normalizeAngleDeg(float angle) {
+        angle = fmodf(angle + 180.0f, 360.0f);
+        if (angle < 0.0f) angle += 360.0f;
+        return angle - 180.0f;
     }
 
     float compute(float target_yaw, float current_yaw, float current_gyro_z, float dt) {
-        if (dt <= 0.0) return 0.0;
+        if (dt <= 0.0f) return 0.0f;
 
-        // BƯỚC 1: Tính và chuẩn hóa sai số góc [-180, 180] chống quay vòng tròn
-        float error_yaw = target_yaw - current_yaw;
-        if (error_yaw > 180.0) error_yaw -= 360.0;
-        if (error_yaw < -180.0) error_yaw += 360.0;
+        // BƯỚC 1: Chuẩn hóa sai số góc về [-180, 180] bất kể xe quay bao nhiêu vòng
+        float error_yaw = normalizeAngleDeg(target_yaw - current_yaw);
 
         // BƯỚC 2: Tính khâu P và I
         float p_out = kp * error_yaw;
         
         integral += ki * error_yaw * dt;
-        // Anti-windup cho góc
-        if (ki != 0) {
-            float max_integral = max_delta_v / ki;
-            if (integral > max_integral) integral = max_integral;
-            else if (integral < -max_integral) integral = -max_integral;
+        if (ki != 0.0f) {
+            if (integral > max_delta_v) integral = max_delta_v;
+            else if (integral < -max_delta_v) integral = -max_delta_v;
         }
 
-        // BƯỚC 3: Dùng Gyro Z thế vào khâu Đạo hàm (D) để triệt tiêu nhiễu
-        float d_out = kd * (0.0 - current_gyro_z);
+        // BƯỚC 3: Dùng Gyro Z thế vào khâu Đạo hàm (D) để triệt tiêu Derivative Kick
+        float d_out = -kd * current_gyro_z;
 
-        // BƯỚC 4: Tổng hợp Delta V và cắt xén để chống lật xe
+        // BƯỚC 4: Tổng hợp Delta V và giới hạn
         float delta_v = p_out + integral + d_out;
         
         if (delta_v > max_delta_v) delta_v = max_delta_v;
@@ -91,5 +102,6 @@ public:
         return delta_v;
     }
 
-    void reset() { integral = 0.0; }
+    void setTunings(float p, float i, float d) { kp = p; ki = i; kd = d; }
+    void reset() { integral = 0.0f; }
 };

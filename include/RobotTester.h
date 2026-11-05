@@ -1,159 +1,171 @@
 #pragma once
 #include <Arduino.h>
-#include "RobotBluetooth.h"
+#include "RobotConfig.h"
 #include "RobotEncoder.h"
 #include "RobotImu.h"
 #include "RobotMotors.h"
-#include "RobotPID.h" // Chứa cả RobotPID và HeadingPID
+#include "RobotPID.h"
+#include "RobotMicroROS.h"
+
+#if APP_MODE == 2
+#include "RobotBluetooth.h"
+#endif
 
 class RobotTester {
 private:
-    int testMode;
-    unsigned long last_bt_time;   
-    unsigned long last_motor_time; 
-    
-    float last_dist_L, last_dist_R;
-    int current_pwm;
-    
-    float base_vel;         
-    float target_vel_L, target_vel_R; 
-    float target_yaw;       
-    bool is_open_loop; 
+    float base_velocity = 0.0f;   // Vận tốc dài đặt (m/s)
+    float target_yaw = 0.0f;      // Góc hướng đặt (độ)
+    unsigned long last_time_us = 0;
 
-    void processCommand(String cmd, RobotBluetooth &bt, RobotEncoder &leftMotor, RobotEncoder &rightMotor, 
-                        RobotImu &imu, RobotMotors &motors, RobotPID &pidLeft, RobotPID &pidRight, HeadingPID &pidHeading) {
-        cmd.trim(); 
-        
-        if (cmd == "1") testMode = 1;
-        else if (cmd == "2") testMode = 2;
-        else if (cmd == "3") testMode = 3;
-        else if (cmd == "0") {
-            leftMotor.reset(); rightMotor.reset(); imu.reset();
-            bt.println(">> DA RESET TOA DO <<");
+    float computeDt() {
+        unsigned long now_us = micros();
+        if (last_time_us == 0) {
+            last_time_us = now_us;
+            return 0.02f;
         }
-        else if (cmd.startsWith("P")) {
-            current_pwm = cmd.substring(1).toInt();
-            motors.setSpeeds(current_pwm, current_pwm);
-            is_open_loop = true;
-            base_vel = 0; target_vel_L = 0; target_vel_R = 0; 
-            if (current_pwm != 0) {
-                Serial.println("Time(ms),PWM,Vel_Left(m/s),Vel_Right(m/s)");
-                bt.println("Time(ms),PWM,Vel_Left(m/s),Vel_Right(m/s)");
-            } else {
-                Serial.println(">> DA DUNG DONG CO <<");
-            }
-        }
-        else if (cmd.startsWith("V")) {
-            float speed = cmd.substring(1).toFloat();
-            speed = constrain(speed, -0.4, 0.4);
-
-            base_vel = speed; 
-            target_yaw = imu.getYaw(); // Chốt góc đi thẳng
-            
-            is_open_loop = false;
-            current_pwm = 0; 
-            
-            Serial.print(">> Da bat Cascade PID. Van toc: "); Serial.print(speed); Serial.println(" m/s <<");
-        }
-        else if (cmd == "STOP") {
-            base_vel = 0; target_vel_L = 0; target_vel_R = 0; current_pwm = 0;
-            motors.stop(); 
-            pidLeft.reset(); pidRight.reset(); pidHeading.reset();
-            Serial.println(">> DA DUNG XE <<");
-        }
+        float dt = (now_us - last_time_us) / 1000000.0f;
+        last_time_us = now_us;
+        if (dt <= 0.0001f || dt > 0.2f) dt = 0.02f;
+        return dt;
     }
 
 public:
-    RobotTester() {
-        testMode = 3;
-        last_bt_time = millis();
-        last_motor_time = millis();
-        last_dist_L = 0; last_dist_R = 0;
-        current_pwm = 0; base_vel = 0; 
-        target_vel_L = 0; target_vel_R = 0; target_yaw = 0; 
-        is_open_loop = true; 
-    }
-
-    // NHẬN THÊM ĐỐI TƯỢNG pidHeading VÀO ĐÂY
-    void update(RobotBluetooth &bt, RobotEncoder &leftMotor, RobotEncoder &rightMotor, 
-                RobotImu &imu, RobotMotors &motors, RobotPID &pidLeft, RobotPID &pidRight, HeadingPID &pidHeading) {
-        
+    #if APP_MODE == 2
+    void updateBluetooth(RobotBluetooth &bt,
+                         RobotEncoder &leftEnc,
+                         RobotEncoder &rightEnc,
+                         RobotImu &imu,
+                         RobotMotors &motors,
+                         RobotPID &pidLeft,
+                         RobotPID &pidRight,
+                         HeadingPID &pidHeading) {
+        float dt = computeDt();
         imu.update();
-        unsigned long current_time = millis();
-        
+
         if (bt.hasData()) {
-            String btCmd = bt.readStringUntil('\n');
-            processCommand(btCmd, bt, leftMotor, rightMotor, imu, motors, pidLeft, pidRight, pidHeading);
-        }
-        if (Serial.available()) {
-            String serialCmd = Serial.readStringUntil('\n');
-            processCommand(serialCmd, bt, leftMotor, rightMotor, imu, motors, pidLeft, pidRight, pidHeading);
-        }
-
-        float dt = (current_time - last_motor_time) / 1000.0;
-        if (dt >= 0.02) {
-            float dist_L = leftMotor.getDistance();
-            float dist_R = rightMotor.getDistance();
-            float vel_L = (dist_L - last_dist_L) / dt;
-            float vel_R = (dist_R - last_dist_R) / dt;
-            
-            last_dist_L = dist_L; last_dist_R = dist_R;
-            last_motor_time = current_time;
-
-            if (is_open_loop) {
-                if (current_pwm != 0) {
-                    Serial.print(current_time); Serial.print(","); Serial.print(current_pwm); Serial.print(",");
-                    Serial.print(vel_L, 4); Serial.print(","); Serial.println(vel_R, 4);
-                }
-            } else {
-                // ========================================================
-                // CHẠY CASCADE VÀ MIXER TRỘN VẬN TỐC
-                // ========================================================
-                if (base_vel != 0) {
-                    // 1. Chạy Vòng ngoài lấy Delta_V
-                    float current_yaw = imu.getYaw();
-                    float current_gyro_z = imu.getGyroZ();
-                    float Delta_V = pidHeading.compute(target_yaw, current_yaw, current_gyro_z, dt);
-
-                    // 2. Mixer chia vận tốc
-                    target_vel_L = base_vel - Delta_V;
-                    target_vel_R = base_vel + Delta_V;
-                } else {
-                    target_vel_L = 0; target_vel_R = 0;
-                }
-
-                // 3. Chạy Vòng trong
-                int pwm_L = (int)pidLeft.compute(target_vel_L, vel_L, dt);
-                int pwm_R = (int)pidRight.compute(target_vel_R, vel_R, dt);
-                
-                if (base_vel != 0) {
-                    motors.setSpeeds(pwm_L, pwm_R);
-                    
-                    static int pid_print_count = 0;
-                    if (pid_print_count++ % 10 == 0) { 
-                        bt.print("Yaw Err: "); bt.print(target_yaw - imu.getYaw(), 2);
-                        bt.print(" | Set L: "); bt.print(target_vel_L, 2); 
-                        bt.print(" | Set R: "); bt.println(target_vel_R, 2); 
-                    }
-                } else {
-                    motors.stop();
-                }
+            String cmd = bt.readStringUntil('\n');
+            cmd.trim();
+            if (cmd.startsWith("V") || cmd.startsWith("v")) {
+                base_velocity = cmd.substring(1).toFloat();
+                target_yaw = imu.getYaw();
+                bt.print("Set Velocity: ");
+                bt.println(base_velocity, 3);
+            } else if (cmd.startsWith("Y") || cmd.startsWith("y")) {
+                target_yaw = cmd.substring(1).toFloat();
+                bt.print("Set Target Yaw: ");
+                bt.println(target_yaw, 1);
+            } else if (cmd.startsWith("S") || cmd.startsWith("s")) {
+                base_velocity = 0.0f;
+                pidLeft.reset();
+                pidRight.reset();
+                pidHeading.reset();
+                motors.stop();
+                bt.println("STOPPED");
+            } else if (cmd.startsWith("R") || cmd.startsWith("r")) {
+                leftEnc.reset();
+                rightEnc.reset();
+                imu.reset();
+                target_yaw = 0.0f;
+                bt.println("RESET OK");
             }
         }
 
-        if (current_time - last_bt_time >= 200) {
-            last_bt_time = current_time; 
-            if (current_pwm == 0 && base_vel == 0) {
-                if (testMode == 1 || testMode == 3) {
-                    bt.print("[ENCODER] L: "); bt.print(leftMotor.getDistance(), 3); 
-                    bt.print("m | R: "); bt.print(rightMotor.getDistance(), 3); bt.println("m");
-                }
-                if (testMode == 2 || testMode == 3) {
-                    if (imu.isReady()) {
-                        bt.print("[IMU] Yaw: "); bt.println(imu.getYaw(), 2);
-                    }
-                }
-            }
+        float v_L = leftEnc.getVelocity(dt);
+        float v_R = rightEnc.getVelocity(dt);
+
+        float delta_v = 0.0f;
+        if (fabsf(base_velocity) > 0.001f || fabsf(HeadingPID::normalizeAngleDeg(target_yaw - imu.getYaw())) > 1.0f) {
+            delta_v = pidHeading.compute(target_yaw, imu.getYaw(), imu.getGyroZ(), dt);
         }
+
+        float v_target_L = base_velocity - delta_v;
+        float v_target_R = base_velocity + delta_v;
+
+        int pwm_L = (int)pidLeft.compute(v_target_L, v_L, dt);
+        int pwm_R = (int)pidRight.compute(v_target_R, v_R, dt);
+
+        motors.setSpeeds(pwm_L, pwm_R);
+
+        static int print_div = 0;
+        if (++print_div >= 10) {
+            print_div = 0;
+            bt.print("Yaw:"); bt.print(imu.getYaw(), 1);
+            bt.print(" | vL:"); bt.print(v_L, 2);
+            bt.print(" | vR:"); bt.println(v_R, 2);
+        }
+    }
+    #endif
+
+    void updateROS(RobotEncoder &leftEnc,
+                   RobotEncoder &rightEnc,
+                   RobotImu &imu,
+                   RobotMotors &motors,
+                   RobotPID &pidLeft,
+                   RobotPID &pidRight,
+                   HeadingPID &pidHeading,
+                   RobotMicroROS &ros_node) {
+        float dt = computeDt();
+
+        // 1. Cập nhật IMU & nhận gói tin /cmd_vel từ ROS 2 Agent
+        imu.update();
+        ros_node.spinSome();
+
+        // 2. Đo vận tốc thực tế, góc bánh xe và tính động học thuận
+        float v_L = leftEnc.getVelocity(dt);
+        float v_R = rightEnc.getVelocity(dt);
+        float pos_L_rad = leftEnc.getPositionRad();
+        float pos_R_rad = rightEnc.getPositionRad();
+        float vel_L_rad = v_L / WHEEL_RADIUS_M;
+        float vel_R_rad = v_R / WHEEL_RADIUS_M;
+
+        float v_x_measured = (v_R + v_L) * 0.5f;
+        float v_theta_measured = (v_R - v_L) / WHEEL_BASE_M;
+
+        // 3. Lấy vận tốc mục tiêu từ ROS 2 (/cmd_vel)
+        float cmd_vx = 0.0f, cmd_wz = 0.0f;
+        ros_node.getCmdVel(cmd_vx, cmd_wz);
+
+        float v_target_L = 0.0f;
+        float v_target_R = 0.0f;
+
+        if (fabsf(cmd_vx) < 0.001f && fabsf(cmd_wz) < 0.001f) {
+            pidLeft.reset();
+            pidRight.reset();
+            pidHeading.reset();
+            motors.stop();
+            target_yaw = imu.getYaw();
+        } else if (fabsf(cmd_wz) < 0.001f) {
+            // Đi thẳng: Dùng HeadingPID khóa góc hướng chống lệch quỹ đạo
+            float delta_v = pidHeading.compute(target_yaw, imu.getYaw(), imu.getGyroZ(), dt);
+            v_target_L = cmd_vx - delta_v;
+            v_target_R = cmd_vx + delta_v;
+
+            int pwm_L = (int)pidLeft.compute(v_target_L, v_L, dt);
+            int pwm_R = (int)pidRight.compute(v_target_R, v_R, dt);
+            motors.setSpeeds(pwm_L, pwm_R);
+        } else {
+            // Đang xoay theo lệnh /cmd_vel từ Teleop hoặc Nav2
+            target_yaw = imu.getYaw();
+            pidHeading.reset();
+
+            v_target_L = cmd_vx - (cmd_wz * WHEEL_BASE_M * 0.5f);
+            v_target_R = cmd_vx + (cmd_wz * WHEEL_BASE_M * 0.5f);
+
+            int pwm_L = (int)pidLeft.compute(v_target_L, v_L, dt);
+            int pwm_R = (int)pidRight.compute(v_target_R, v_R, dt);
+            motors.setSpeeds(pwm_L, pwm_R);
+        }
+
+        // 4. Xuất bản /telemetry (KaiaaiTelemetry2) & /imu/data ở tần số 50Hz
+        ros_node.publishData(
+            v_x_measured,
+            v_theta_measured,
+            imu.getYaw(),
+            imu.getGyroZ(),
+            pos_L_rad,
+            pos_R_rad,
+            vel_L_rad,
+            vel_R_rad,
+            dt);
     }
 };

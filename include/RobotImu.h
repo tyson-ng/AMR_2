@@ -22,6 +22,7 @@ public:
     void begin() {
         Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
         Wire.setClock(400000); 
+        Wire.setTimeOut(20);
 
         Wire.beginTransmission(MPU_ADDR);
         Wire.write(0x6B); 
@@ -36,9 +37,9 @@ public:
             Wire.write(0x08);
             Wire.endTransmission();
             
-            // =======================================================
-            // AUTO CALIBRATION (TIÊU CHUẨN CÔNG NGHIỆP)
-            // =======================================================
+            // ================
+            // AUTO CALIBRATION 
+            // =================
             Serial.println("IMU: Dang hieu chuan Gyro... Vui long giu xe DUNG IM!");
             
             // 1. Chạy rà trơn (Warm-up): Vứt bỏ 100 mẫu rác đầu tiên

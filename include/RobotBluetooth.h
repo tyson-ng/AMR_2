@@ -10,6 +10,7 @@ public:
     // Khởi động Bluetooth
     void begin(const String& name) {
         bt.begin(name);
+        bt.setTimeout(5);
     }
 
     // Kiểm tra có dữ liệu đến không
@@ -22,7 +23,7 @@ public:
         return bt.read();
     }
 
-    // --- HÀM MỚI THÊM: Đọc cả một chuỗi lệnh dài (Dùng cho P150, V0.15, STOP) ---
+    // Đọc một chuỗi lệnh dài (Dùng cho P150, V0.15, STOP) ---
     String readStringUntil(char terminator) {
         return bt.readStringUntil(terminator);
     }
@@ -35,7 +36,7 @@ public:
 
     template <typename T>
     void print(T msg, int format) {
-        bt.print(msg, format); // Hỗ trợ in số thập phân (ví dụ: in 3 số sau dấu phẩy)
+        bt.print(msg, format); // Hỗ trợ in số thập phân 
     }
 
     template <typename T>
